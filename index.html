@@ -171,8 +171,9 @@
         await db.from('meals').delete().eq('id', id);
         await loadMeals(selectedDate);
       }
-      async function saveWeight(weight) {
-        const { error } = await db.from('weights').upsert({ date: todayStr(), weight }, { onConflict: 'date' });
+      async function saveWeight(weight, date) {
+        const targetDate = date || todayStr();
+        const { error } = await db.from('weights').upsert({ date: targetDate, weight }, { onConflict: 'date' });
         if (error) { alert('Napaka pri shranjevanju teže'); return; }
         await loadWeights();
       }
@@ -394,9 +395,14 @@
     /* ═══ WEIGHT ═══ */
     function Weight({ weights, onSave, onDelete }) {
       const [input, setInput] = useState('');
+      const [inputDate, setInputDate] = useState(todayStr());
       const [range, setRange] = useState('30');
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
+
+      // Preveri če že obstaja vnos za izbrani datum
+      const existingForDate = useMemo(() =>
+        weights.find(w => w.date === inputDate), [weights, inputDate]);
 
       const filtered = useMemo(() => {
         if (range === 'all') return weights;
@@ -455,7 +461,14 @@
       const handleSubmit = () => {
         const w = parseFloat(input.replace(',', '.'));
         if (isNaN(w) || w < 30 || w > 300) { alert('Vnesi veljavno težo (30–300 kg)'); return; }
-        onSave(w); setInput('');
+        if (existingForDate) {
+          const oldW = parseFloat(existingForDate.weight).toFixed(1);
+          if (!confirm(`Za ta dan že obstaja teža ${oldW} kg. Prepišem z ${w.toFixed(1)} kg?`)) return;
+        }
+        onSave(w, inputDate);
+        setInput('');
+        // Reset datum nazaj na danes po vpisu (varovalka)
+        setInputDate(todayStr());
       };
 
       return (
@@ -463,14 +476,20 @@
           <h1 className="text-2xl font-medium mb-4">Teža</h1>
 
           <div className="rounded-xl p-3 mb-4" style={{ background: 'rgba(255,255,255,0.04)' }}>
-            <div className="text-xs text-white/50 mb-2">Vpiši težo za danes</div>
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-xs text-white/50">Vpiši težo</div>
+              <input type="date"
+                value={inputDate}
+                max={todayStr()}
+                onChange={(e) => setInputDate(e.target.value)}
+                className="text-[11px] text-white/80 rounded-md px-2 py-1"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', colorScheme: 'dark' }} />
+            </div>
             <div className="flex gap-2">
               <input type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                 value={input}
                 onChange={(e) => {
-                  // Dovoli samo števke, vejico in piko; vejico zamenjaj s piko
                   let v = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
-                  // Dovoli samo eno decimalno piko
                   const parts = v.split('.');
                   if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
                   setInput(v);
@@ -481,6 +500,11 @@
               <button onClick={handleSubmit}
                 className="bg-blue-500 text-white px-5 rounded-lg text-sm font-medium active:scale-95 transition">Shrani</button>
             </div>
+            {existingForDate && (
+              <div className="text-[10px] text-amber-400/80 mt-2">
+                ⚠️ Za {formatDate(inputDate)} že imaš vpisano {parseFloat(existingForDate.weight).toFixed(1)} kg
+              </div>
+            )}
           </div>
 
           {stats && (
