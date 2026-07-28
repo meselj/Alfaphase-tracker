@@ -104,18 +104,32 @@
       return d.toLocaleDateString('sl-SI', { weekday: 'short', day: 'numeric', month: 'short' });
     };
 
+    // Decimalno: sprejme "82,4" ali "82.4" -> Number; nevalidno -> 0
+    const parseNum = (v) => {
+      const n = parseFloat(String(v).replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    };
+    // Prikaz: zaokroži na 1 decimalko, brez odvečnih ničel (180.0 -> "180", 180.5 -> "180.5")
+    const fmt = (n) => {
+      const num = Math.round((parseFloat(n) || 0) * 10) / 10;
+      return String(num);
+    };
+
     const MEAL_TYPES = [
-      { key: 'breakfast', label: 'Zajtrk' },
-      { key: 'lunch',     label: 'Kosilo' },
-      { key: 'dinner',    label: 'Večerja' },
-      { key: 'snack',     label: 'Prigrizek' },
+      { key: 'breakfast',    label: 'Zajtrk' },
+      { key: 'lunch',        label: 'Kosilo' },
+      { key: 'dinner',       label: 'Večerja' },
+      { key: 'snack',        label: 'Prigrizek' },
+      { key: 'preworkout',   label: 'Pred treningom' },
+      { key: 'intraworkout', label: 'Med treningom' },
+      { key: 'postworkout',  label: 'Po treningu' },
     ];
 
     /* ═══ APP ═══ */
     function App() {
       const [tab, setTab] = useState('dashboard');
       const [selectedDate, setSelectedDate] = useState(todayStr());
-      const [goals, setGoals] = useState({ kcal: 2300, protein: 180, carbs: 230, fat: 75 });
+      const [goals, setGoals] = useState({ kcal: 2300, protein: 180, carbs: 230, fat: 75, fiber: 30 });
       const [meals, setMeals] = useState([]);
       const [weights, setWeights] = useState([]);
       const [loading, setLoading] = useState(true);
@@ -136,12 +150,26 @@
       async function loadGoals() {
         const { data, error } = await db.from('goals').select('*').eq('id', 1).single();
         if (error) throw error;
-        if (data) setGoals({ kcal: data.kcal, protein: data.protein, carbs: data.carbs, fat: data.fat });
+        if (data) setGoals({
+          kcal: Number(data.kcal) || 0,
+          protein: Number(data.protein) || 0,
+          carbs: Number(data.carbs) || 0,
+          fat: Number(data.fat) || 0,
+          fiber: data.fiber != null ? Number(data.fiber) : 30,
+        });
       }
       async function loadMeals(date) {
         const { data, error } = await db.from('meals').select('*').eq('date', date).order('created_at');
         if (error) { console.error(error); return; }
-        setMeals(data || []);
+        // numeric stolpci pridejo iz Supabase kot string -> pretvori v število
+        setMeals((data || []).map(m => ({
+          ...m,
+          kcal: Number(m.kcal) || 0,
+          protein: Number(m.protein) || 0,
+          carbs: Number(m.carbs) || 0,
+          fat: Number(m.fat) || 0,
+          fiber: Number(m.fiber) || 0,
+        })));
       }
       async function loadWeights() {
         const { data, error } = await db.from('weights').select('*').order('date', { ascending: true });
@@ -157,7 +185,7 @@
         if (meal.id) {
           const { error } = await db.from('meals').update({
             meal_type: meal.meal_type, name: meal.name, kcal: meal.kcal,
-            protein: meal.protein, carbs: meal.carbs, fat: meal.fat,
+            protein: meal.protein, carbs: meal.carbs, fat: meal.fat, fiber: meal.fiber,
           }).eq('id', meal.id);
           if (error) { alert('Napaka pri urejanju'); return; }
         } else {
@@ -183,9 +211,10 @@
       }
 
       const totals = useMemo(() => meals.reduce((a, m) => ({
-        kcal: a.kcal + m.kcal, protein: a.protein + m.protein,
-        carbs: a.carbs + m.carbs, fat: a.fat + m.fat,
-      }), { kcal: 0, protein: 0, carbs: 0, fat: 0 }), [meals]);
+        kcal: a.kcal + (m.kcal || 0), protein: a.protein + (m.protein || 0),
+        carbs: a.carbs + (m.carbs || 0), fat: a.fat + (m.fat || 0),
+        fiber: a.fiber + (m.fiber || 0),
+      }), { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }), [meals]);
 
       const handleFab = () => {
         if (tab === 'weight') return;
@@ -276,9 +305,9 @@
                 style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <div className="text-4xl font-medium">{Math.max(0, remaining)}</div>
+              <div className="text-4xl font-medium">{Math.max(0, Math.round(remaining))}</div>
               <div className="text-xs text-white/50 mt-0.5">{remaining < 0 ? 'čez cilj' : 'preostalo kcal'}</div>
-              <div className="text-[11px] text-white/35 mt-1.5">{totals.kcal} / {goals.kcal}</div>
+              <div className="text-[11px] text-white/35 mt-1.5">{Math.round(totals.kcal)} / {goals.kcal}</div>
             </div>
           </div>
 
@@ -286,6 +315,7 @@
             <MacroBar label="Beljakovine" current={totals.protein} goal={goals.protein} color="#ef4444" />
             <MacroBar label="Ogljikovi h." current={totals.carbs} goal={goals.carbs} color="#22c55e" />
             <MacroBar label="Maščobe" current={totals.fat} goal={goals.fat} color="#f59e0b" />
+            <MacroBar label="Vlaknine" current={totals.fiber} goal={goals.fiber} color="#8b5cf6" />
           </div>
 
           <div className="grid grid-cols-3 gap-2 mb-4">
@@ -303,7 +333,7 @@
         <div>
           <div className="flex justify-between text-sm mb-1.5">
             <span className="text-white/70">{label}</span>
-            <span className="font-medium">{current} / {goal} g</span>
+            <span className="font-medium">{fmt(current)} / {fmt(goal)} g</span>
           </div>
           <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
             <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, background: color }} />
@@ -335,7 +365,7 @@
             </button>
             <div className="text-center">
               <div className="text-sm font-medium capitalize">{formatDate(selectedDate)}</div>
-              <div className="text-[10px] text-white/40">{totals.kcal} / {goals.kcal} kcal</div>
+              <div className="text-[10px] text-white/40">{Math.round(totals.kcal)} / {goals.kcal} kcal</div>
             </div>
             <button onClick={() => setSelectedDate(addDays(selectedDate, 1))}
               className="p-2 active:scale-90 transition disabled:opacity-30"
@@ -348,7 +378,7 @@
             <div key={g.key} className="mb-5">
               <div className="flex justify-between text-xs text-white/45 pb-1.5 mb-1" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <span className="uppercase tracking-wider font-medium">{g.label}</span>
-                <span>{g.items.reduce((s, m) => s + m.kcal, 0)} kcal</span>
+                <span>{Math.round(g.items.reduce((s, m) => s + m.kcal, 0))} kcal</span>
               </div>
               {g.items.length === 0 ? (
                 <div className="text-xs text-white/25 py-2 italic">Brez vnosa</div>
@@ -385,9 +415,9 @@
           className="flex justify-between items-center py-2.5 px-1 rounded-lg transition cursor-pointer active:bg-white/5">
           <div className="flex-1 min-w-0 pr-3">
             <div className="text-sm font-medium truncate">{meal.name || 'Obrok'}</div>
-            <div className="text-[11px] text-white/40 mt-0.5">B {meal.protein} · OH {meal.carbs} · M {meal.fat}</div>
+            <div className="text-[11px] text-white/40 mt-0.5">B {fmt(meal.protein)} · OH {fmt(meal.carbs)} · M {fmt(meal.fat)} · V {fmt(meal.fiber)}</div>
           </div>
-          <div className="text-sm font-medium">{meal.kcal}</div>
+          <div className="text-sm font-medium">{Math.round(meal.kcal)}</div>
         </div>
       );
     }
@@ -628,6 +658,7 @@
       const [protein, setProtein] = useState(initial?.protein ?? '');
       const [carbs, setCarbs] = useState(initial?.carbs ?? '');
       const [fat, setFat] = useState(initial?.fat ?? '');
+      const [fiber, setFiber] = useState(initial?.fiber ?? '');
 
       const handleSave = () => {
         const k = parseInt(kcal, 10);
@@ -635,9 +666,10 @@
         onSave({
           ...(initial?.id ? { id: initial.id } : {}),
           meal_type: mealType, name: name.trim() || null, kcal: k,
-          protein: parseInt(protein, 10) || 0,
-          carbs: parseInt(carbs, 10) || 0,
-          fat: parseInt(fat, 10) || 0,
+          protein: parseNum(protein),
+          carbs: parseNum(carbs),
+          fat: parseNum(fat),
+          fiber: parseNum(fiber),
         });
       };
 
@@ -646,7 +678,7 @@
           <div className="grid grid-cols-2 gap-1.5 mb-4">
             {MEAL_TYPES.map(t => (
               <button key={t.key} onClick={() => setMealType(t.key)}
-                className={`py-2.5 text-sm rounded-lg transition ${mealType === t.key ? 'bg-blue-500 text-white' : 'text-white/70'}`}
+                className={`py-2.5 px-1 text-sm rounded-lg transition ${mealType === t.key ? 'bg-blue-500 text-white' : 'text-white/70'}`}
                 style={mealType !== t.key ? { background: 'rgba(255,255,255,0.05)' } : {}}>
                 {t.label}
               </button>
@@ -659,15 +691,18 @@
           <Field label="Kalorije *">
             <input type="number" inputMode="numeric" value={kcal} onChange={e => setKcal(e.target.value)} placeholder="0" className={INPUT_CLS} style={INPUT_STYLE} autoFocus={!initial} />
           </Field>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="B (g)">
-              <input type="number" inputMode="numeric" value={protein} onChange={e => setProtein(e.target.value)} placeholder="0" className={INPUT_CLS} style={INPUT_STYLE} />
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Beljakovine (g)">
+              <NumInput value={protein} onChange={setProtein} placeholder="0" />
             </Field>
-            <Field label="OH (g)">
-              <input type="number" inputMode="numeric" value={carbs} onChange={e => setCarbs(e.target.value)} placeholder="0" className={INPUT_CLS} style={INPUT_STYLE} />
+            <Field label="Ogljikovi h. (g)">
+              <NumInput value={carbs} onChange={setCarbs} placeholder="0" />
             </Field>
-            <Field label="M (g)">
-              <input type="number" inputMode="numeric" value={fat} onChange={e => setFat(e.target.value)} placeholder="0" className={INPUT_CLS} style={INPUT_STYLE} />
+            <Field label="Maščobe (g)">
+              <NumInput value={fat} onChange={setFat} placeholder="0" />
+            </Field>
+            <Field label="Vlaknine (g)">
+              <NumInput value={fiber} onChange={setFiber} placeholder="0" />
             </Field>
           </div>
 
@@ -684,18 +719,20 @@
       const [protein, setProtein] = useState(goals.protein);
       const [carbs, setCarbs] = useState(goals.carbs);
       const [fat, setFat] = useState(goals.fat);
+      const [fiber, setFiber] = useState(goals.fiber);
 
-      const macroKcal = (parseInt(protein, 10) || 0) * 4 + (parseInt(carbs, 10) || 0) * 4 + (parseInt(fat, 10) || 0) * 9;
+      const macroKcal = parseNum(protein) * 4 + parseNum(carbs) * 4 + parseNum(fat) * 9;
       const targetKcal = parseInt(kcal, 10) || 0;
-      const diff = macroKcal - targetKcal;
+      const diff = Math.round(macroKcal - targetKcal);
       const mismatch = Math.abs(diff) > 50;
 
       const handleSave = () => {
         onSave({
           kcal: parseInt(kcal, 10) || 2300,
-          protein: parseInt(protein, 10) || 0,
-          carbs: parseInt(carbs, 10) || 0,
-          fat: parseInt(fat, 10) || 0,
+          protein: parseNum(protein),
+          carbs: parseNum(carbs),
+          fat: parseNum(fat),
+          fiber: parseNum(fiber),
         });
       };
 
@@ -705,17 +742,20 @@
             <input type="number" inputMode="numeric" value={kcal} onChange={e => setKcal(e.target.value)} className={INPUT_CLS} style={INPUT_STYLE} />
           </Field>
           <Field label="Beljakovine (g)">
-            <input type="number" inputMode="numeric" value={protein} onChange={e => setProtein(e.target.value)} className={INPUT_CLS} style={INPUT_STYLE} />
+            <NumInput value={protein} onChange={setProtein} />
           </Field>
           <Field label="Ogljikovi hidrati (g)">
-            <input type="number" inputMode="numeric" value={carbs} onChange={e => setCarbs(e.target.value)} className={INPUT_CLS} style={INPUT_STYLE} />
+            <NumInput value={carbs} onChange={setCarbs} />
           </Field>
           <Field label="Maščobe (g)">
-            <input type="number" inputMode="numeric" value={fat} onChange={e => setFat(e.target.value)} className={INPUT_CLS} style={INPUT_STYLE} />
+            <NumInput value={fat} onChange={setFat} />
+          </Field>
+          <Field label="Vlaknine (g)">
+            <NumInput value={fiber} onChange={setFiber} />
           </Field>
 
           <div className={`text-[11px] mt-2 mb-3 leading-relaxed ${mismatch ? 'text-amber-400' : 'text-white/40'}`}>
-            {mismatch ? '⚠️ ' : ''}Makro skupek = {macroKcal} kcal {diff !== 0 && `(${diff > 0 ? '+' : ''}${diff} od cilja)`}
+            {mismatch ? '⚠️ ' : ''}Makro skupek = {Math.round(macroKcal)} kcal {diff !== 0 && `(${diff > 0 ? '+' : ''}${diff} od cilja)`}
           </div>
 
           <button onClick={handleSave} className="w-full bg-blue-500 text-white py-3 rounded-xl font-medium active:scale-95 transition">
@@ -728,6 +768,28 @@
     /* ═══ SHARED ═══ */
     const INPUT_CLS = "w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30";
     const INPUT_STYLE = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' };
+
+    // Decimalni vnos: sprejme cifre + , + . ; tipkovnica pokaže decimalno
+    function NumInput({ value, onChange, placeholder, autoFocus }) {
+      return (
+        <input
+          type="text"
+          inputMode="decimal"
+          pattern="[0-9]*[.,]?[0-9]*"
+          value={value}
+          autoFocus={autoFocus}
+          onChange={(e) => {
+            let v = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.');
+            const parts = v.split('.');
+            if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+            onChange(v);
+          }}
+          placeholder={placeholder}
+          className={INPUT_CLS}
+          style={INPUT_STYLE}
+        />
+      );
+    }
 
     function Field({ label, children }) {
       return (
