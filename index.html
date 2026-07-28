@@ -178,7 +178,7 @@
       }
       async function saveGoals(newGoals) {
         const { error } = await db.from('goals').update({ ...newGoals, updated_at: new Date().toISOString() }).eq('id', 1);
-        if (error) { alert('Napaka pri shranjevanju ciljev'); return; }
+        if (error) { alert('Napaka pri shranjevanju ciljev:\n' + (error.message || '') + '\n' + (error.hint || '')); console.error(error); return; }
         setGoals(newGoals); setShowEditGoals(false);
       }
       async function saveMeal(meal) {
@@ -187,10 +187,10 @@
             meal_type: meal.meal_type, name: meal.name, kcal: meal.kcal,
             protein: meal.protein, carbs: meal.carbs, fat: meal.fat, fiber: meal.fiber,
           }).eq('id', meal.id);
-          if (error) { alert('Napaka pri urejanju'); return; }
+          if (error) { alert('Napaka pri urejanju:\n' + (error.message || '') + '\n' + (error.hint || '')); console.error(error); return; }
         } else {
           const { error } = await db.from('meals').insert({ ...meal, date: selectedDate });
-          if (error) { alert('Napaka pri dodajanju'); return; }
+          if (error) { alert('Napaka pri dodajanju:\n' + (error.message || '') + '\n' + (error.hint || '')); console.error(error); return; }
         }
         await loadMeals(selectedDate);
         setShowAddMeal(false); setEditingMeal(null);
